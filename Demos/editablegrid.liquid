@@ -1,0 +1,248 @@
+<script src="https://bossanova.uk/jexcel/v4/jexcel.js"></script>
+<link rel="stylesheet" href="https://bossanova.uk/jexcel/v4/jexcel.css" type="text/css" />
+
+<script src="https://bossanova.uk/jsuites/v2/jsuites.js"></script>
+<link rel="stylesheet" href="https://bossanova.uk/jsuites/v2/jsuites.css" type="text/css" />
+
+<link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Material+Icons" />
+
+<style>
+    .lds-ellipsis {
+        display: inline-block;
+        position: relative;
+        height: 10px;
+    }
+
+    .lds-ellipsis div {
+        position: absolute;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: #fff;
+        animation-timing-function: cubic-bezier(0, 1, 1, 0);
+    }
+
+    .lds-ellipsis div:nth-child(1) {
+        left: 8px;
+        animation: lds-ellipsis1 0.6s infinite;
+    }
+
+    .lds-ellipsis div:nth-child(2) {
+        left: 8px;
+        animation: lds-ellipsis2 0.6s infinite;
+    }
+
+    .lds-ellipsis div:nth-child(3) {
+        left: 32px;
+        animation: lds-ellipsis2 0.6s infinite;
+    }
+
+    .lds-ellipsis div:nth-child(4) {
+        left: 56px;
+        animation: lds-ellipsis3 0.6s infinite;
+    }
+
+    @keyframes lds-ellipsis1 {
+        0% {
+            transform: scale(0);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    @keyframes lds-ellipsis3 {
+        0% {
+            transform: scale(1);
+        }
+
+        100% {
+            transform: scale(0);
+        }
+    }
+
+    @keyframes lds-ellipsis2 {
+        0% {
+            transform: translate(0, 0);
+        }
+
+        100% {
+            transform: translate(24px, 0);
+        }
+    }
+</style>
+
+<div class="container">
+    <h1>Devices - Editable Grid</h1>
+    <div id="loader" class="alert alert-info hidden">
+        <span style="margin-right: 10px;"><strong>Saving...</strong></span>
+        <div class="lds-ellipsis">
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+        </div>
+    </div>
+    <div id="successMessage" class="alert alert-success hidden">
+        <strong>Success!</strong> Records updated successfully!
+    </div>
+    <div id="errorMessage" class="alert alert-danger hidden">
+        <strong>Error!</strong> Indicates a dangerous or potentially negative action.
+    </div>
+    <div id="spreadsheet"></div>
+</div>
+
+
+<!-- Fetching list of contacts -->
+{% fetchxml contactList %}
+<fetch version="1.0" mapping="logical">
+    <entity name="dwc_device">
+        <attribute name="dwc_name" />
+        <attribute name="dwc_serialnumber" />
+        <attribute name="dwc_deviceid" />
+        <order attribute="dwc_name" descending="false" />
+        <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+        </filter>
+    </entity>
+</fetch>
+{% endfetchxml %}
+
+
+<script>
+    //Web API ajax wrapper
+    (function (webapi, $) {
+        function safeAjax(ajaxOptions) {
+            var deferredAjax = $.Deferred();
+            shell.getTokenDeferred().done(function (token) {
+                // Add headers for ajax
+                if (!ajaxOptions.headers) {
+                    $.extend(ajaxOptions, {
+                        headers: {
+                            "__RequestVerificationToken": token
+                        }
+                    });
+                } else {
+                    ajaxOptions.headers["__RequestVerificationToken"] = token;
+                }
+                $.ajax(ajaxOptions)
+                    .done(function (data, textStatus, jqXHR) {
+                        validateLoginSession(data, textStatus, jqXHR, deferredAjax.resolve);
+                    }).fail(deferredAjax.reject); //ajax
+            }).fail(function () {
+                deferredAjax.rejectWith(this, arguments); // On token failure pass the token ajax and args
+            });
+            return deferredAjax.promise();
+        }
+        webapi.safeAjax = safeAjax;
+    })(window.webapi = window.webapi || {}, jQuery)
+
+
+    function saveContact(contactFieldsArr) {
+        let contactObj = {
+            "dwc_name": contactFieldsArr[0],
+            "dwc_serialnumber": contactFieldsArr[1]
+        }
+
+        let requestURL = `/_api/dwc_devices(${contactFieldsArr[2]})`;
+
+        $("#loader").removeClass("hidden");
+
+        webapi.safeAjax({
+            type: "PATCH",
+            url: requestURL,
+            contentType: "application/json",
+            data: JSON.stringify(contactObj),
+            success: function (res, status, xhr) {
+                $("#loader").addClass("hidden");
+                $("#successMessage").removeClass("hidden");
+                console.log("Success!");
+            },
+            error: function(xhr, status, error){
+                $("#loader").addClass("hidden");
+                $("#errorMessage").removeClass("hidden");
+                console.error("xhr:", xhr);
+                console.error("Error occured:", error);
+                console.log("Error responseText: " + xhr.responseText);
+            }
+        });
+    }
+
+
+    function saveContacts() {
+        for (let index = 0; index < changedRows.length; index++) {
+            const rowIndex = changedRows[index];
+
+            let rowData = table.getRowData(rowIndex);
+
+            saveContact(rowData);
+        }
+    }
+
+    // list of row indexes that were changed
+    var changedRows = [];
+
+    // function that will be called when data is changed in table
+    var onDataChange = function (instance, cell, colNum, rowNum, value) {
+        let findIndex = changedRows.findIndex(elem => elem == rowNum);
+
+        if (findIndex == -1) {
+            changedRows.push(rowNum);
+        }
+    }
+
+    var data = [
+        {% for entity in contactList.results.entities %}
+        [
+        "{{ entity.dwc_name }}",
+            "{{ entity.dwc_serialnumber }}",
+            "{{ entity.dwc_deviceid }}"
+        ] {% unless forloop.last %}, {% endunless %}
+        {% endfor %}
+    ];
+
+    var table = jexcel(document.getElementById('spreadsheet'), {
+        data: data,
+        columns: [{
+                type: 'text',
+                title: 'Name',
+                width: 220
+            },
+            {
+                type: 'text',
+                title: 'Serial Number',
+                width: 220
+            },
+            {
+                type: 'text',
+                title: 'Id',
+                width: 120,
+                readOnly: true
+            }
+        ],
+        toolbar: [{
+                type: 'i',
+                content: 'undo',
+                onclick: function () {
+                    table.undo();
+                }
+            },
+            {
+                type: 'i',
+                content: 'redo',
+                onclick: function () {
+                    table.redo();
+                }
+            },
+            {
+                type: 'i',
+                content: 'save',
+                onclick: function () {
+                    saveContacts();
+                }
+            }
+        ],
+        onchange: onDataChange
+    });
+</script>
